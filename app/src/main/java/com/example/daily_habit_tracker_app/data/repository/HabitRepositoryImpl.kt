@@ -1,55 +1,58 @@
 package com.example.daily_habit_tracker_app.data.repository
 
-import com.example.daily_habit_tracker_app.data.local.HabitDao
-import com.example.daily_habit_tracker_app.data.local.HabitEntity
+
 import com.example.daily_habit_tracker_app.domain.model.Habit
 import com.example.daily_habit_tracker_app.domain.repository.HabitRepository
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
 
-class HabitRepositoryImpl @Inject constructor(
-    private val dao: HabitDao
-) : HabitRepository {
+class HabitRepositoryImpl @Inject constructor() : HabitRepository {
 
-    override fun getHabits(): Flow<List<Habit>> {
-        return dao.getHabits().map { list ->
-            list.map { it.toHabit() }
-        }
+    private val db = FirebaseFirestore.getInstance()
+    private val auth = FirebaseAuth.getInstance()
+
+    private fun userHabitsCollection() = db.collection("users")
+        .document(auth.currentUser?.uid ?: "")
+        .collection("habits")
+
+    override fun getHabits(): Flow<List<Habit>> = callbackFlow {
+        val listenerRegistration: ListenerRegistration = userHabitsCollection()
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) {
+                    return@addSnapshotListener
+                }
+                val habits = snapshot.documents.mapNotNull {
+                    it.toObject(Habit::class.java)?.copy(id = it.id)
+                }
+                trySend(habits).isSuccess
+            }
+
+        awaitClose { listenerRegistration.remove() }
     }
 
-    override suspend fun getHabitById(id: Int): Habit? {
-        return dao.getHabitById(id)?.toHabit()
+    override suspend fun getHabitById(id: String): Habit? {
+        val doc = userHabitsCollection().document(id).get().await()
+        return doc.toObject(Habit::class.java)?.copy(id = doc.id)
     }
 
     override suspend fun insertHabit(habit: Habit) {
-        dao.insertHabit(habit.toEntity())
+        val habitToSave = habit.copy(id = "")
+        val docRef = userHabitsCollection().add(habitToSave).await()
+        docRef.update("id", docRef.id)
     }
 
     override suspend fun updateHabit(habit: Habit) {
-        dao.updateHabit(habit.toEntity())
+        userHabitsCollection().document(habit.id).set(habit).await()
     }
 
     override suspend fun deleteHabit(habit: Habit) {
-        dao.deleteHabit(habit.toEntity())
+        userHabitsCollection().document(habit.id).delete().await()
     }
-}
-
-// Mappers
-fun HabitEntity.toHabit(): Habit {
-    return Habit(
-        id = id,
-        title = title,
-        description = description,
-        isCompleted = isCompleted
-    )
-}
-
-fun Habit.toEntity(): HabitEntity {
-    return HabitEntity(
-        id = id,
-        title = title,
-        description = description,
-        isCompleted = isCompleted
-    )
 }

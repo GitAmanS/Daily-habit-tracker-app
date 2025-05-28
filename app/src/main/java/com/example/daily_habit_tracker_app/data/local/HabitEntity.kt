@@ -5,8 +5,9 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "habits")
 data class HabitEntity(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    @PrimaryKey val id: String,
     val title: String,
-    val description: String,
-    val isCompleted: Boolean
+    val description: String?,
+    val frequency: String,
+    val completionHistory: String // Stored as JSON string
 )
